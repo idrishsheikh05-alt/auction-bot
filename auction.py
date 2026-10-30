@@ -726,11 +726,13 @@ def main():
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_reject_reason))
 
-    # Start the Flask web server in a background thread so Render's port checker passes
+            # Start the Flask web server in a background thread so Render's port checker passes
     Thread(target=run_web, daemon=True).start()
 
     # Start Telegram bot polling
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
+    
+    
