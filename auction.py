@@ -25,7 +25,7 @@ def run_web():
     app_flask.run(host="0.0.0.0", port=port)
 
 # ----------------- BOT CONFIGURATION & CONSTANTS -----------------
-BOT_TOKEN = "9147976890:AAFUlqLbKolEtuRh6fXqUhWy6hte9FgB_NY"
+BOT_TOKEN = "9147976890:AAGcIPJ6h7JdB44mfJiob8FGYkOPC5L7syY"
 ADMIN_GROUP_ID = -1003840329293
 CHANNEL_ID = "@pwpokes"
 
