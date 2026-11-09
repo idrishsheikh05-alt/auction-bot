@@ -37,6 +37,7 @@ DATA_FILE = "auction_data.json"
 
 submission_open = True
 auction_started = True
+submissions_closed = False
 
 bot_admins = set()          
 verified_users = set()      
@@ -44,20 +45,20 @@ auction_db = {}
 pending_rejections = {}
 user_states = {}
 active_auctions = {}
-submissions_closed = False  # Add this line
 
 
 def save_data():
     data = {
         "bot_admins": list(bot_admins),
         "verified_users": list(verified_users),
-        "auction_db": auction_db
+        "auction_db": auction_db,
+        "active_auctions": active_auctions
     }
     with open(DATA_FILE, "w") as f:
         json.dump(data, f)
 
 def load_data():
-    global bot_admins, verified_users, auction_db
+    global bot_admins, verified_users, auction_db, active_auctions
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r") as f:
@@ -65,6 +66,7 @@ def load_data():
                 bot_admins = set(data.get("bot_admins", []))
                 verified_users = set(data.get("verified_users", []))
                 auction_db = data.get("auction_db", {})
+                active_auctions = data.get("active_auctions", {})
         except Exception as e:
             logging.error(f"Error loading data: {e}")
 
@@ -100,12 +102,13 @@ async def offsell(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🔒 Submissions are now {status_text}")
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global active_auctions
+    global active_auctions, auction_db
     if update.effective_user.id != OWNER_ID:
         await update.message.reply_text("❌ Not authorized.")
         return
     active_auctions.clear()
-    save_auctions(active_auctions)
+    auction_db.clear()
+    save_data()
     await update.message.reply_text("🔄 Weekly auction data reset successfully. All previous items and bids have been cleared!")
 
 async def remove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -116,9 +119,9 @@ async def remove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ℹ️ Usage: /remove <auction_id>")
         return
     auction_id = context.args[0]
-    if auction_id in active_auctions:
-        del active_auctions[auction_id]
-        save_auctions(active_auctions)
+    if auction_id in auction_db:
+        del auction_db[auction_id]
+        save_data()
         await update.message.reply_text(f"✅ Auction ID `{auction_id}` has been removed.")
     else:
         await update.message.reply_text("❌ Auction ID not found.")
@@ -155,20 +158,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         await query.message.reply_photo(photo=welcome_image, caption=welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.chat.type != "private":
-        return
-    if submissions_closed:  # Add this check
-        await update.message.reply_text("❌ Submissions are currently closed by the admin.")
-        return
-    user_id = update.effective_user.id
-    # ... rest of your add function
-
 async def start_sell_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if chat.type != "private":
         if update.message:
             await update.message.reply_text("⚠️ Item submissions using /add can only be done inside Private Chat (DM) with the bot!")
+        return ConversationHandler.END
+
+    if submissions_closed:
+        if update.message:
+            await update.message.reply_text("❌ Submissions are currently closed by the admin.")
         return ConversationHandler.END
 
     user_id = update.effective_user.id
@@ -667,7 +666,7 @@ async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     target_id = await resolve_target_user_id(update, context)
     if not target_id:
-        await update.message.reply_text("Usage: Reply to a user with /removeadmin or use /removeadmin <user_id> / /removeadmin @username.")
+        await update.message.reply_text("Usage: Reply to a user with /addadmin or use /addadmin <user_id> / /addadmin @username.")
         return
 
     bot_admins.discard(target_id)
@@ -767,16 +766,17 @@ def main():
     app.add_handler(CommandHandler("bid", place_bid))
     app.add_handler(CommandHandler("bud", place_bid))
 
+    # New command handlers added correctly inside main()
     app.add_handler(CommandHandler("offsell", offsell))
-app.add_handler(CommandHandler("reset", reset_command))
-app.add_handler(CommandHandler("remove", remove_command))
+    app.add_handler(CommandHandler("reset", reset_command))
+    app.add_handler(CommandHandler("remove", remove_command))
 
     app.add_handler(CommandHandler(["opensell", "closesell"], toggle_submission))
     app.add_handler(CommandHandler(["startauction", "endauction"], toggle_auction))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_reject_reason))
 
-            # Start the Flask web server in a background thread so Render's port checker passes
+    # Start the Flask web server in a background thread so Render's port checker passes
     Thread(target=run_web, daemon=True).start()
 
     # Start Telegram bot polling
@@ -784,5 +784,3 @@ app.add_handler(CommandHandler("remove", remove_command))
 
 if __name__ == "__main__":
     main()
-    
-    
