@@ -42,6 +42,10 @@ bot_admins = set()
 verified_users = set()      
 auction_db = {}             
 pending_rejections = {}
+user_states = {}
+active_auctions = {}
+submissions_closed = False  # Add this line
+
 
 def save_data():
     data = {
@@ -86,6 +90,39 @@ def parse_price(price_str: str) -> int:
 def generate_item_id():
     return ''.join(random.choices(string.ascii_letters, k=5))
 
+async def offsell(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global submissions_closed
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("❌ Not authorized.")
+        return
+    submissions_closed = not submissions_closed
+    status_text = "CLOSED ❌" if submissions_closed else "OPEN ✅"
+    await update.message.reply_text(f"🔒 Submissions are now {status_text}")
+
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global active_auctions
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("❌ Not authorized.")
+        return
+    active_auctions.clear()
+    save_auctions(active_auctions)
+    await update.message.reply_text("🔄 Weekly auction data reset successfully. All previous items and bids have been cleared!")
+
+async def remove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("❌ Not authorized.")
+        return
+    if not context.args:
+        await update.message.reply_text("ℹ️ Usage: /remove <auction_id>")
+        return
+    auction_id = context.args[0]
+    if auction_id in active_auctions:
+        del active_auctions[auction_id]
+        save_auctions(active_auctions)
+        await update.message.reply_text(f"✅ Auction ID `{auction_id}` has been removed.")
+    else:
+        await update.message.reply_text("❌ Auction ID not found.")
+
 async def resolve_target_user_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
     if update.message and update.message.reply_to_message:
         return update.message.reply_to_message.from_user.id
@@ -117,6 +154,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
         await query.message.reply_photo(photo=welcome_image, caption=welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.chat.type != "private":
+        return
+    if submissions_closed:  # Add this check
+        await update.message.reply_text("❌ Submissions are currently closed by the admin.")
+        return
+    user_id = update.effective_user.id
+    # ... rest of your add function
 
 async def start_sell_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -720,6 +766,10 @@ def main():
     
     app.add_handler(CommandHandler("bid", place_bid))
     app.add_handler(CommandHandler("bud", place_bid))
+
+    app.add_handler(CommandHandler("offsell", offsell))
+app.add_handler(CommandHandler("reset", reset_command))
+app.add_handler(CommandHandler("remove", remove_command))
 
     app.add_handler(CommandHandler(["opensell", "closesell"], toggle_submission))
     app.add_handler(CommandHandler(["startauction", "endauction"], toggle_auction))
