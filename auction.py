@@ -701,7 +701,50 @@ async def toggle_auction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         auction_started = False
         await update.message.reply_text("🔴 Auction Bidding has ENDED!")
 
-async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("❌ Not authorized.")
+        return
+        
+    if not update.message.reply_to_message:
+        await update.message.reply_text("ℹ️ Usage: Reply to any message with /broadcast to send it to all users.")
+        return
+
+    # Collect all unique user IDs from verified_users or auction_db sellers/bidders, 
+    # or you can track all users who ever pressed /start. Let's gather all known user IDs:
+    all_users = set(verified_users)
+    for item in auction_db.values():
+        if "seller_id" in item:
+            all_users.add(item["seller_id"])
+    
+    if OWNER_ID in all_users:
+        all_users.remove(OWNER_ID)  # Skip owner if desired
+
+    if not all_users:
+        await update.message.reply_text("⚠️ No users found in the database to broadcast to.")
+        return
+
+    target_message = update.message.reply_to_message
+    success_count = 0
+    fail_count = 0
+
+    status_msg = await update.message.reply_text(f"📢 Starting broadcast to {len(all_users)} users...")
+
+    for user_id in all_users:
+        try:
+            await target_message.copy(chat_id=user_id)
+            success_count += 1
+        except Exception as e:
+            fail_count += 1
+            logging.error(f"Failed to send broadcast to {user_id}: {e}")
+
+    await status_msg.edit_text(
+        f"✅ Broadcast Complete!\n\n"
+        f"• Successfully sent: {success_count}\n"
+        f"• Failed (Blocked/Inactive): {fail_count}"
+    )
+    
+    async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin_or_owner(user_id):
         await update.message.reply_text("❌ You do not have permission to view admin controls.")
@@ -770,6 +813,8 @@ def main():
     app.add_handler(CommandHandler("offsell", offsell))
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("remove", remove_command))
+    app.add_handler(CommandHandler("broadcast", broadcast_command))
+    
 
     app.add_handler(CommandHandler(["opensell", "closesell"], toggle_submission))
     app.add_handler(CommandHandler(["startauction", "endauction"], toggle_auction))
