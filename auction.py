@@ -41,6 +41,7 @@ submissions_closed = False
 
 bot_admins = set()          
 verified_users = set()      
+all_known_users = set()     
 auction_db = {}             
 pending_rejections = {}
 user_states = {}
@@ -51,6 +52,7 @@ def save_data():
     data = {
         "bot_admins": list(bot_admins),
         "verified_users": list(verified_users),
+        "all_known_users": list(all_known_users),
         "auction_db": auction_db,
         "active_auctions": active_auctions
     }
@@ -58,13 +60,14 @@ def save_data():
         json.dump(data, f)
 
 def load_data():
-    global bot_admins, verified_users, auction_db, active_auctions
+    global bot_admins, verified_users, all_known_users, auction_db, active_auctions
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r") as f:
                 data = json.load(f)
                 bot_admins = set(data.get("bot_admins", []))
                 verified_users = set(data.get("verified_users", []))
+                all_known_users = set(data.get("all_known_users", []))
                 auction_db = data.get("auction_db", {})
                 active_auctions = data.get("active_auctions", {})
         except Exception as e:
@@ -142,6 +145,9 @@ async def resolve_target_user_id(update: Update, context: ContextTypes.DEFAULT_T
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    all_known_users.add(user.id)
+    save_data()
+
     welcome_text = f"Hey there {user.first_name}! Welcome to PW Auction Bot\n\nYou can add your Pokémon and TMs for auction here securely and easily."
     
     keyboard = [
@@ -171,6 +177,9 @@ async def start_sell_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     user_id = update.effective_user.id
+    all_known_users.add(user_id)
+    save_data()
+
     if not submission_open and not is_admin_or_owner(user_id):
         await update.message.reply_text("⛔ Item submissions are currently CLOSED by the Owner.")
         return ConversationHandler.END
@@ -339,6 +348,7 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
     d["seller_username"] = f"@{user.username}" if user.username else user.first_name
     d["status"] = "pending"
     auction_db[item_id] = d
+    all_known_users.add(user.id)
     save_data()
 
     await query.message.reply_text(f"Successfully Submitted! Item ID: {item_id}. Awaiting admin approval.")
@@ -453,6 +463,9 @@ async def place_bid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user_id = update.effective_user.id
+    all_known_users.add(user_id)
+    save_data()
+
     if not auction_started:
         await update.message.reply_text("⛔ Bidding is currently CLOSED by the Owner.")
         return
@@ -710,27 +723,21 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ℹ️ Usage: Reply to any message with /broadcast to send it to all users.")
         return
 
-    # Collect all unique user IDs from verified_users or auction_db sellers/bidders, 
-    # or you can track all users who ever pressed /start. Let's gather all known user IDs:
-    all_users = set(verified_users)
-    for item in auction_db.values():
-        if "seller_id" in item:
-            all_users.add(item["seller_id"])
-    
-    if OWNER_ID in all_users:
-        all_users.remove(OWNER_ID)  # Skip owner if desired
+    target_users = set(all_known_users)
+    if OWNER_ID in target_users:
+        target_users.remove(OWNER_ID)
 
-    if not all_users:
-        await update.message.reply_text("⚠️ No users found in the database to broadcast to.")
+    if not target_users:
+        await update.message.reply_text("⚠️ No users found in database to broadcast to.")
         return
 
     target_message = update.message.reply_to_message
     success_count = 0
     fail_count = 0
 
-    status_msg = await update.message.reply_text(f"📢 Starting broadcast to {len(all_users)} users...")
+    status_msg = await update.message.reply_text(f"📢 Starting broadcast to {len(target_users)} users...")
 
-    for user_id in all_users:
+    for user_id in target_users:
         try:
             await target_message.copy(chat_id=user_id)
             success_count += 1
@@ -743,8 +750,8 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Successfully sent: {success_count}\n"
         f"• Failed (Blocked/Inactive): {fail_count}"
     )
-    
-    async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin_or_owner(user_id):
         await update.message.reply_text("❌ You do not have permission to view admin controls.")
@@ -766,6 +773,10 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /closesell — Close item submissions\n"
             "• /startauction — Start bidding window\n"
             "• /endauction — End bidding window\n"
+            "• /offsell — Toggle item submissions open/closed\n"
+            "• /reset — Reset weekly database\n"
+            "• /remove <id> — Remove specific auction item\n"
+            "• /broadcast — Broadcast replied message to all users\n"
         )
     await update.message.reply_text(help_text)
 
@@ -809,12 +820,10 @@ def main():
     app.add_handler(CommandHandler("bid", place_bid))
     app.add_handler(CommandHandler("bud", place_bid))
 
-    # New command handlers added correctly inside main()
     app.add_handler(CommandHandler("offsell", offsell))
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("remove", remove_command))
     app.add_handler(CommandHandler("broadcast", broadcast_command))
-    
 
     app.add_handler(CommandHandler(["opensell", "closesell"], toggle_submission))
     app.add_handler(CommandHandler(["startauction", "endauction"], toggle_auction))
